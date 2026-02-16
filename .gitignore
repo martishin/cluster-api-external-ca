@@ -33,3 +33,6 @@ go.work.sum
 
 # PoC artifacts
 out/
+
+# Local cached image archives
+bin/

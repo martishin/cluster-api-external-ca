@@ -3,13 +3,13 @@
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 POC_DIR="$ROOT_DIR/hack"
 OUT_DIR="$ROOT_DIR/out"
-OUT_BIN_DIR="${OUT_BIN_DIR:-$OUT_DIR/bin}"
-TMP_WORK_DIR="${TMP_WORK_DIR:-$OUT_DIR/mgmt}"
-MGMT_KUBECONFIG="${MGMT_KUBECONFIG:-$TMP_WORK_DIR/mgmt.kubeconfig}"
+OUT_BIN_DIR="$OUT_DIR/bin"
+MGMT_WORK_DIR="$OUT_DIR/mgmt"
+MGMT_KUBECONFIG="$MGMT_WORK_DIR/mgmt.kubeconfig"
 
 export PATH="$OUT_BIN_DIR:$PATH"
 export OUT_BIN_DIR
-export TMP_WORK_DIR
+export MGMT_WORK_DIR
 export MGMT_KUBECONFIG
 if [[ -z "${KUBECONFIG:-}" ]]; then
   export KUBECONFIG="$MGMT_KUBECONFIG"
@@ -30,5 +30,5 @@ require_bin() {
 }
 
 ensure_out_dirs() {
-  mkdir -p "$OUT_DIR/results" "$OUT_BIN_DIR"
+  mkdir -p "$OUT_DIR/results" "$OUT_BIN_DIR" "$MGMT_WORK_DIR"
 }

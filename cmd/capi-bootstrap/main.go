@@ -43,6 +43,7 @@ func main() {
 		apiserverSANs        string
 		etcdSANs             string
 		serverOverride       string
+		kubeletNodeName      string
 		outputDir            string
 		dryRun               bool
 		cleanup              bool
@@ -62,6 +63,7 @@ func main() {
 	flag.StringVar(&apiserverSANs, "apiserver-san", "", "Extra apiserver SANs, comma-separated")
 	flag.StringVar(&etcdSANs, "etcd-san", "", "Extra etcd SANs, comma-separated")
 	flag.StringVar(&serverOverride, "server", "", "Override kubeconfig server URL, e.g. https://1.2.3.4:6443")
+	flag.StringVar(&kubeletNodeName, "kubelet-node-name", "", "Node name for /etc/kubernetes/kubelet.conf auth user (system:node:<name>)")
 	flag.StringVar(&outputDir, "output-dir", "out", "Local output directory for mock-ca material")
 	flag.BoolVar(&dryRun, "dry-run", false, "Run without mutating the cluster")
 	flag.BoolVar(&cleanup, "cleanup", false, "Delete generated sensitive local artifacts from output-dir after successful bootstrap")
@@ -95,6 +97,7 @@ func main() {
 		APIServerSANs:    splitCSV(apiserverSANs),
 		EtcdSANs:         splitCSV(etcdSANs),
 		KubeconfigServer: server,
+		KubeletNodeName:  kubeletNodeName,
 		OutputDir:        clusterOut,
 	}
 	switch mode {
@@ -177,6 +180,14 @@ func applySecrets(ctx context.Context, client *k8s.Client, namespace, clusterNam
 			Type:       corev1.SecretTypeOpaque,
 			Data: map[string][]byte{
 				"tls.crt": a.EtcdCA.CertPEM,
+			},
+		},
+		{
+			ObjectMeta: metav1.ObjectMeta{Name: clusterName + "-apiserver-etcd-client", Labels: labels},
+			Type:       corev1.SecretTypeOpaque,
+			Data: map[string][]byte{
+				"tls.crt": a.APIEtcd.CertPEM,
+				"tls.key": a.APIEtcd.KeyPEM,
 			},
 		},
 		{

@@ -45,6 +45,8 @@ func BuildKubeadmFilesFromSecret(secretName string, a *pki.Artifacts) ([]map[str
 		{Path: "/etc/kubernetes/pki/etcd/healthcheck-client.key", SecretKey: "pki-etcd-healthcheck-client-key", Data: a.EtcdHealth.KeyPEM, Perm: "0600"},
 
 		{Path: "/etc/kubernetes/admin.conf", SecretKey: "kubeconfig-admin", Data: a.AdminKubeconfig, Perm: "0600"},
+		{Path: "/etc/kubernetes/kubelet.conf", SecretKey: "kubeconfig-kubelet", Data: a.KubeletKubeconfig, Perm: "0600"},
+		{Path: "/etc/kubernetes/super-admin.conf", SecretKey: "kubeconfig-super-admin", Data: a.SuperAdminKubeconfig, Perm: "0600"},
 		{Path: "/etc/kubernetes/controller-manager.conf", SecretKey: "kubeconfig-controller-manager", Data: a.ControllerManagerKubeconfig, Perm: "0600"},
 		{Path: "/etc/kubernetes/scheduler.conf", SecretKey: "kubeconfig-scheduler", Data: a.SchedulerKubeconfig, Perm: "0600"},
 	}

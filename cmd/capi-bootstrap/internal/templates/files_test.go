@@ -22,6 +22,8 @@ func testArtifacts() *pki.Artifacts {
 		EtcdPeer:                    pki.KeyPair{CertPEM: b, KeyPEM: b},
 		EtcdHealth:                  pki.KeyPair{CertPEM: b, KeyPEM: b},
 		AdminKubeconfig:             b,
+		KubeletKubeconfig:           b,
+		SuperAdminKubeconfig:        b,
 		ControllerManagerKubeconfig: b,
 		SchedulerKubeconfig:         b,
 	}
@@ -37,6 +39,12 @@ func TestBuildKubeadmFilesFromSecret_Success(t *testing.T) {
 	}
 	if _, ok := secretData["pki-ca-crt"]; !ok {
 		t.Fatalf("expected pki-ca-crt in secret data")
+	}
+	if _, ok := secretData["kubeconfig-super-admin"]; !ok {
+		t.Fatalf("expected kubeconfig-super-admin in secret data")
+	}
+	if _, ok := secretData["kubeconfig-kubelet"]; !ok {
+		t.Fatalf("expected kubeconfig-kubelet in secret data")
 	}
 }
 

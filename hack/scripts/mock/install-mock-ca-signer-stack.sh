@@ -5,15 +5,18 @@ source "$SCRIPT_DIR/../utils/env.sh"
 source "$SCRIPT_DIR/../utils/kube.sh"
 
 CLUSTER_NAME="${CLUSTER_NAME:-external-ca-cluster}"
+CERT_MANAGER_CHART_VERSION="v1.16.1"
+TRUST_MANAGER_CHART_VERSION="v0.14.0"
 require_bin helm kubectl
 
 log "installing cert-manager and trust-manager"
 helm repo add jetstack https://charts.jetstack.io >/dev/null 2>&1 || true
-helm repo update >/dev/null
+helm repo update jetstack >/dev/null
 if kubectl -n cert-manager get deploy cert-manager >/dev/null 2>&1; then
   log "cert-manager already exists in cluster; skipping helm install"
 else
   helm upgrade --install cert-manager jetstack/cert-manager \
+    --version "$CERT_MANAGER_CHART_VERSION" \
     --namespace cert-manager \
     --create-namespace \
     --set crds.enabled=true
@@ -26,6 +29,7 @@ if kubectl -n cert-manager get deploy trust-manager >/dev/null 2>&1; then
   log "trust-manager already exists in cluster; skipping helm install"
 else
   helm upgrade --install trust-manager jetstack/trust-manager \
+    --version "$TRUST_MANAGER_CHART_VERSION" \
     --namespace cert-manager \
     --create-namespace \
     --set app.trust.namespace=cert-manager

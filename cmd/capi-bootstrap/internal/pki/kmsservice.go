@@ -134,6 +134,14 @@ func GenerateKMSServiceArtifacts(ctx context.Context, opts GenerateOptions, kmsC
 	if err != nil {
 		return nil, err
 	}
+	superAdmin, err := newLeafViaKMSService(ctx, kmsClient, kmsserviceapi.CAKubernetes, clusterCACert, leafSpec{
+		CommonName: "kubernetes-super-admin",
+		Org:        []string{"system:masters"},
+		Usages:     []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
+	})
+	if err != nil {
+		return nil, err
+	}
 	controllerManager, err := newLeafViaKMSService(ctx, kmsClient, kmsserviceapi.CAKubernetes, clusterCACert, leafSpec{
 		CommonName: "system:kube-controller-manager",
 		Org:        []string{"system:kube-controller-manager"},
@@ -155,8 +163,17 @@ func GenerateKMSServiceArtifacts(ctx context.Context, opts GenerateOptions, kmsC
 	if server == "" {
 		server = "https://127.0.0.1:6443"
 	}
+	kubeletUser := kubeletAuthInfoUser(opts.KubeletNodeName)
 
 	adminCfg, err := BuildKubeconfig(server, clusterCAPEM, "kubernetes-admin", admin.CertPEM, admin.KeyPEM)
+	if err != nil {
+		return nil, err
+	}
+	kubeletCfg, err := BuildKubeconfig(server, clusterCAPEM, kubeletUser, admin.CertPEM, admin.KeyPEM)
+	if err != nil {
+		return nil, err
+	}
+	superAdminCfg, err := BuildKubeconfig(server, clusterCAPEM, "kubernetes-super-admin", superAdmin.CertPEM, superAdmin.KeyPEM)
 	if err != nil {
 		return nil, err
 	}
@@ -182,6 +199,8 @@ func GenerateKMSServiceArtifacts(ctx context.Context, opts GenerateOptions, kmsC
 		EtcdPeer:                    etcdPeer,
 		EtcdHealth:                  etcdHealth,
 		AdminKubeconfig:             adminCfg,
+		KubeletKubeconfig:           kubeletCfg,
+		SuperAdminKubeconfig:        superAdminCfg,
 		ControllerManagerKubeconfig: cmCfg,
 		SchedulerKubeconfig:         schedulerCfg,
 	}, nil

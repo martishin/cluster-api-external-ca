@@ -34,6 +34,8 @@ type Artifacts struct {
 	EtcdHealth  KeyPair
 
 	AdminKubeconfig             []byte
+	KubeletKubeconfig           []byte
+	SuperAdminKubeconfig        []byte
 	ControllerManagerKubeconfig []byte
 	SchedulerKubeconfig         []byte
 }
@@ -43,6 +45,7 @@ type GenerateOptions struct {
 	APIServerSANs    []string
 	EtcdSANs         []string
 	KubeconfigServer string
+	KubeletNodeName  string
 	OutputDir        string
 }
 
@@ -148,6 +151,14 @@ func GenerateMockArtifacts(opts GenerateOptions) (*Artifacts, error) {
 	if err != nil {
 		return nil, err
 	}
+	superAdmin, err := newLeaf(clusterCert, clusterCA, leafSpec{
+		CommonName: "kubernetes-super-admin",
+		Org:        []string{"system:masters"},
+		Usages:     []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
+	})
+	if err != nil {
+		return nil, err
+	}
 	controllerManager, err := newLeaf(clusterCert, clusterCA, leafSpec{
 		CommonName: "system:kube-controller-manager",
 		Org:        []string{"system:kube-controller-manager"},
@@ -169,8 +180,17 @@ func GenerateMockArtifacts(opts GenerateOptions) (*Artifacts, error) {
 	if server == "" {
 		server = "https://127.0.0.1:6443"
 	}
+	kubeletUser := kubeletAuthInfoUser(opts.KubeletNodeName)
 
 	adminCfg, err := BuildKubeconfig(server, clusterCA.CertPEM, "kubernetes-admin", admin.CertPEM, admin.KeyPEM)
+	if err != nil {
+		return nil, err
+	}
+	kubeletCfg, err := BuildKubeconfig(server, clusterCA.CertPEM, kubeletUser, admin.CertPEM, admin.KeyPEM)
+	if err != nil {
+		return nil, err
+	}
+	superAdminCfg, err := BuildKubeconfig(server, clusterCA.CertPEM, "kubernetes-super-admin", superAdmin.CertPEM, superAdmin.KeyPEM)
 	if err != nil {
 		return nil, err
 	}
@@ -196,9 +216,19 @@ func GenerateMockArtifacts(opts GenerateOptions) (*Artifacts, error) {
 		EtcdPeer:                    etcdPeer,
 		EtcdHealth:                  etcdHealth,
 		AdminKubeconfig:             adminCfg,
+		KubeletKubeconfig:           kubeletCfg,
+		SuperAdminKubeconfig:        superAdminCfg,
 		ControllerManagerKubeconfig: cmCfg,
 		SchedulerKubeconfig:         schedulerCfg,
 	}, nil
+}
+
+func kubeletAuthInfoUser(nodeName string) string {
+	nodeName = strings.TrimSpace(nodeName)
+	if nodeName == "" {
+		return "kubernetes-admin"
+	}
+	return kubeletUserPrefix + nodeName
 }
 
 func CleanupSensitiveOutput(outputDir string) error {
@@ -242,7 +272,7 @@ func isSensitiveOutputName(name string) bool {
 		return true
 	}
 	switch name {
-	case "admin.conf", "controller-manager.conf", "scheduler.conf", "bootstrap-admin.conf":
+	case "admin.conf", "kubelet.conf", "super-admin.conf", "controller-manager.conf", "scheduler.conf", "bootstrap-admin.conf":
 		return true
 	default:
 		return false

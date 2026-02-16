@@ -8,14 +8,19 @@ require_bin git make docker kind kubectl
 
 CAPI_REF="${CAPI_REF:-v1.8.8}"
 CAPI_VERSION="${CAPI_VERSION:-$CAPI_REF}"
-CAPI_DIR="${CAPI_DIR:-$TMP_WORK_DIR/cluster-api}"
+CAPI_DIR="${CAPI_DIR:-$ROOT_DIR/bin/cluster-api}"
 PATCH_DIR="$POC_DIR/capi-patches"
 APPLY_PATCH="${APPLY_PATCH:-true}"
 TAG="${TAG:-external-ca-dev}"
 ARCH="${ARCH:-$(go env GOARCH)}"
 REGISTRY="${REGISTRY:-gcr.io/k8s-staging-cluster-api}"
+IMAGE_CACHE_BASE_DIR="${IMAGE_CACHE_BASE_DIR:-$ROOT_DIR/bin/capi-images/$CAPI_REF/$TAG/$ARCH}"
+PATCH_BUNDLE_HASH="upstream"
+IMAGE_CACHE_DIR="${IMAGE_CACHE_DIR:-}"
+patch_files=()
 
-mkdir -p "$TMP_WORK_DIR"
+mkdir -p "$MGMT_WORK_DIR"
+mkdir -p "$(dirname "$CAPI_DIR")"
 
 case "$APPLY_PATCH" in
   true|false) ;;
@@ -24,6 +29,27 @@ case "$APPLY_PATCH" in
     exit 1
     ;;
 esac
+
+if [[ "$APPLY_PATCH" == "true" ]]; then
+  mapfile -t patch_files < <(find "$PATCH_DIR" -maxdepth 1 -type f -name '*.patch' | sort)
+  if [[ "${#patch_files[@]}" -eq 0 ]]; then
+    echo "no patch files were detected in $PATCH_DIR" >&2
+    exit 1
+  fi
+
+  PATCH_BUNDLE_HASH="$(
+    {
+      for patch in "${patch_files[@]}"; do
+        printf '%s  %s\n' "$(git hash-object "$patch")" "$(basename "$patch")"
+      done
+    } | git hash-object --stdin
+  )"
+fi
+
+if [[ -z "$IMAGE_CACHE_DIR" ]]; then
+  IMAGE_CACHE_DIR="$IMAGE_CACHE_BASE_DIR/$PATCH_BUNDLE_HASH"
+fi
+mkdir -p "$IMAGE_CACHE_DIR"
 
 if [[ ! -d "$CAPI_DIR/.git" ]]; then
   log "cloning cluster-api into $CAPI_DIR"
@@ -38,38 +64,70 @@ git reset --hard "$CAPI_REF"
 git clean -fd
 
 if [[ "$APPLY_PATCH" == "true" ]]; then
-  applied_or_present=0
-  for patch in "$PATCH_DIR"/*.patch; do
-    [[ -e "$patch" ]] || continue
+  for patch in "${patch_files[@]}"; do
     if git apply --check "$patch" >/dev/null 2>&1; then
       log "applying patch $(basename "$patch")"
       git apply "$patch"
-      applied_or_present=1
     elif git apply --reverse --check "$patch" >/dev/null 2>&1; then
       log "patch $(basename "$patch") is already applied"
-      applied_or_present=1
     else
       echo "patch $(basename "$patch") cannot be applied cleanly to $CAPI_REF; rebase/fix patch first" >&2
       exit 1
     fi
   done
-  if [[ "$applied_or_present" -eq 0 ]]; then
-    echo "no patch files were applied or detected in $PATCH_DIR" >&2
-    exit 1
-  fi
 else
   log "building upstream CAPI from source ref $CAPI_REF (no local patch applied)"
 fi
-
-log "building CAPI controller images with TAG=$TAG ARCH=$ARCH REGISTRY=$REGISTRY"
-make REGISTRY="$REGISTRY" ALL_DOCKER_BUILD="core kubeadm-bootstrap kubeadm-control-plane" docker-build TAG="$TAG"
-popd >/dev/null
 
 IMAGES=(
   "${REGISTRY}/cluster-api-controller-${ARCH}:${TAG}"
   "${REGISTRY}/kubeadm-bootstrap-controller-${ARCH}:${TAG}"
   "${REGISTRY}/kubeadm-control-plane-controller-${ARCH}:${TAG}"
 )
+
+IMAGE_ARCHIVES=(
+  "$IMAGE_CACHE_DIR/cluster-api-controller-${ARCH}.tar"
+  "$IMAGE_CACHE_DIR/kubeadm-bootstrap-controller-${ARCH}.tar"
+  "$IMAGE_CACHE_DIR/kubeadm-control-plane-controller-${ARCH}.tar"
+)
+
+cache_complete=true
+for archive in "${IMAGE_ARCHIVES[@]}"; do
+  if [[ ! -s "$archive" ]]; then
+    cache_complete=false
+    break
+  fi
+done
+
+if [[ "$cache_complete" == "true" ]]; then
+  log "found cached CAPI images in $IMAGE_CACHE_DIR; loading into docker"
+  for archive in "${IMAGE_ARCHIVES[@]}"; do
+    docker load -i "$archive" >/dev/null
+  done
+else
+  if compgen -G "$IMAGE_CACHE_DIR/*.tar" >/dev/null; then
+    log "image cache in $IMAGE_CACHE_DIR is incomplete; rebuilding and refreshing cache"
+  else
+    log "image cache is empty in $IMAGE_CACHE_DIR; building CAPI images"
+  fi
+
+  log "building CAPI controller images with TAG=$TAG ARCH=$ARCH REGISTRY=$REGISTRY"
+  make REGISTRY="$REGISTRY" ALL_DOCKER_BUILD="core kubeadm-bootstrap kubeadm-control-plane" docker-build TAG="$TAG"
+
+  log "saving built images to $IMAGE_CACHE_DIR"
+  for i in "${!IMAGES[@]}"; do
+    docker save -o "${IMAGE_ARCHIVES[$i]}" "${IMAGES[$i]}"
+  done
+
+  # Ensure images are available in docker even after refresh.
+  for image in "${IMAGES[@]}"; do
+    if ! docker image inspect "$image" >/dev/null 2>&1; then
+      echo "failed to prepare image: $image" >&2
+      exit 1
+    fi
+  done
+fi
+popd >/dev/null
 
 for image in "${IMAGES[@]}"; do
   log "loading $image into kind cluster capi-mgmt"
@@ -103,6 +161,53 @@ kubectl apply -f "$CAPI_DIR/bootstrap/kubeadm/config/crd/bases/bootstrap.cluster
 kubectl apply -f "$CAPI_DIR/bootstrap/kubeadm/config/crd/bases/bootstrap.cluster.x-k8s.io_kubeadmconfigtemplates.yaml"
 kubectl apply -f "$CAPI_DIR/controlplane/kubeadm/config/crd/bases/controlplane.cluster.x-k8s.io_kubeadmcontrolplanes.yaml"
 kubectl apply -f "$CAPI_DIR/controlplane/kubeadm/config/crd/bases/controlplane.cluster.x-k8s.io_kubeadmcontrolplanetemplates.yaml"
+
+# Ensure externalCA is exposed on v1beta1 schemas. Some patch hunks can land only in
+# deprecated CRD versions, while workload manifests use v1beta1.
+ensure_externalca_v1beta1_schema() {
+  local crd="$1"
+  local jsonpath_suffix="$2"
+  local patch_suffix="$3"
+  local idx existing
+
+  idx="$(kubectl get crd "$crd" -o go-template='{{range $i,$v := .spec.versions}}{{if eq $v.name "v1beta1"}}{{$i}}{{end}}{{end}}')"
+  if [[ -z "$idx" ]]; then
+    echo "v1beta1 version not found in CRD: $crd" >&2
+    exit 1
+  fi
+
+  existing="$(kubectl get crd "$crd" -o jsonpath="{.spec.versions[$idx].schema.openAPIV3Schema${jsonpath_suffix}.type}" 2>/dev/null || true)"
+  if [[ "$existing" == "boolean" ]]; then
+    log "externalCA already present in $crd v1beta1 schema"
+    return 0
+  fi
+
+  kubectl patch crd "$crd" --type='json' -p "[{\"op\":\"add\",\"path\":\"/spec/versions/$idx/schema/openAPIV3Schema${patch_suffix}\",\"value\":{\"type\":\"boolean\"}}]" >/dev/null
+
+  existing="$(kubectl get crd "$crd" -o jsonpath="{.spec.versions[$idx].schema.openAPIV3Schema${jsonpath_suffix}.type}" 2>/dev/null || true)"
+  if [[ "$existing" != "boolean" ]]; then
+    echo "failed to ensure externalCA in $crd v1beta1 schema" >&2
+    exit 1
+  fi
+  log "added externalCA to $crd v1beta1 schema"
+}
+
+ensure_externalca_v1beta1_schema \
+  "kubeadmconfigs.bootstrap.cluster.x-k8s.io" \
+  ".properties.spec.properties.externalCA" \
+  "/properties/spec/properties/externalCA"
+ensure_externalca_v1beta1_schema \
+  "kubeadmconfigtemplates.bootstrap.cluster.x-k8s.io" \
+  ".properties.spec.properties.template.properties.spec.properties.externalCA" \
+  "/properties/spec/properties/template/properties/spec/properties/externalCA"
+ensure_externalca_v1beta1_schema \
+  "kubeadmcontrolplanes.controlplane.cluster.x-k8s.io" \
+  ".properties.spec.properties.kubeadmConfigSpec.properties.externalCA" \
+  "/properties/spec/properties/kubeadmConfigSpec/properties/externalCA"
+ensure_externalca_v1beta1_schema \
+  "kubeadmcontrolplanetemplates.controlplane.cluster.x-k8s.io" \
+  ".properties.spec.properties.template.properties.spec.properties.kubeadmConfigSpec.properties.externalCA" \
+  "/properties/spec/properties/template/properties/spec/properties/kubeadmConfigSpec/properties/externalCA"
 
 log "waiting for CAPI deployments rollout"
 kubectl -n capi-system rollout status deployment/capi-controller-manager --timeout=5m

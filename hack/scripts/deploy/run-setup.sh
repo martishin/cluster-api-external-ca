@@ -32,8 +32,8 @@ reset_management_cluster() {
   kind delete cluster --name capi-mgmt >/dev/null 2>&1 || true
   "$POC_DIR/scripts/setup/cleanup-local-capd-artifacts.sh"
   rm -rf "$OUT_DIR/results" "$OUT_DIR/external-ca" "$OUT_DIR/self-signed-ca"
-  rm -rf "$TMP_WORK_DIR"
-  mkdir -p "$TMP_WORK_DIR"
+  rm -rf "$MGMT_WORK_DIR"
+  mkdir -p "$MGMT_WORK_DIR"
 }
 
 "$POC_DIR/scripts/setup/check-prereqs.sh"

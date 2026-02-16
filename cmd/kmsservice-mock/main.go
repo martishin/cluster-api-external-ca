@@ -74,6 +74,12 @@ var signingProfilesByCA = map[string]map[string]csrProfile{
 			extKeyUsages:  []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
 			allowSANs:     false,
 		},
+		"kubernetes-super-admin": {
+			commonName:    "kubernetes-super-admin",
+			organizations: []string{"system:masters"},
+			extKeyUsages:  []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
+			allowSANs:     false,
+		},
 		"system:kube-controller-manager": {
 			commonName:    "system:kube-controller-manager",
 			organizations: []string{"system:kube-controller-manager"},

@@ -52,6 +52,8 @@ spec:
         - 127.0.0.1
         - 0.0.0.0
     initConfiguration:
+      skipPhases:
+      - kubelet-finalize/experimental-cert-rotation
       nodeRegistration:
         kubeletExtraArgs:
           eviction-hard: nodefs.available<0%,nodefs.inodesFree<0%,imagefs.available<0%

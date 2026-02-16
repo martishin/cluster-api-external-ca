@@ -21,6 +21,7 @@ Supported CA names:
   - `kube-apiserver` (requires SANs)
   - `kube-apiserver-kubelet-client` (requires org `system:masters`, SANs not allowed)
   - `kubernetes-admin` (requires org `system:masters`, SANs not allowed)
+  - `kubernetes-super-admin` (requires org `system:masters`, SANs not allowed)
   - `system:kube-controller-manager` (requires org `system:kube-controller-manager`, SANs not allowed)
   - `system:kube-scheduler` (requires org `system:kube-scheduler`, SANs not allowed)
 - `kubernetes-front-proxy-ca`

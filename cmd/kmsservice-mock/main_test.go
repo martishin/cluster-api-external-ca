@@ -68,6 +68,35 @@ func TestServerSignCSR_Success(t *testing.T) {
 	}
 }
 
+func TestServerSignCSR_SuperAdminSuccess(t *testing.T) {
+	ca := mustNewTestCA(t, kmsserviceapi.CAKubernetes)
+	s := &server{cas: map[string]*caMaterial{kmsserviceapi.CAKubernetes: ca}}
+
+	csrPEM := mustNewCSRPEM(t, csrInput{
+		commonName:    "kubernetes-super-admin",
+		organizations: []string{"system:masters"},
+	})
+	payload, err := kmsservicegrpc.EncodeSignRequest(kmsserviceapi.SignCSRRequest{
+		CAName: kmsserviceapi.CAKubernetes,
+		CSRPEM: string(csrPEM),
+	})
+	if err != nil {
+		t.Fatalf("EncodeSignRequest failed: %v", err)
+	}
+
+	resp, err := s.SignCSR(context.Background(), wrapperspb.String(payload))
+	if err != nil {
+		t.Fatalf("SignCSR failed: %v", err)
+	}
+	crt := mustParseCertPEM(t, []byte(resp.GetValue()))
+	if crt.Subject.CommonName != "kubernetes-super-admin" {
+		t.Fatalf("unexpected cert CN: %q", crt.Subject.CommonName)
+	}
+	if !hasExtKeyUsage(crt.ExtKeyUsage, x509.ExtKeyUsageClientAuth) {
+		t.Fatalf("expected clientAuth EKU, got %v", crt.ExtKeyUsage)
+	}
+}
+
 func TestServerSignCSR_InvalidPayload(t *testing.T) {
 	s := &server{cas: map[string]*caMaterial{}}
 	_, err := s.SignCSR(context.Background(), wrapperspb.String("not-json"))

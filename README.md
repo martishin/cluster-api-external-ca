@@ -34,6 +34,7 @@ This repository includes:
 - `docker`
 - `kubectl`
 - `kind`
+- `clusterctl`
 - `openssl`
 - `helm`
 
@@ -50,11 +51,11 @@ make setup-self-signed-ca
 What setup does:
 
 - recreates local `capi-mgmt` kind management cluster
-- builds `clusterctl` from source at `CAPI_VERSION`
+- uses local `clusterctl` binary from `PATH`
 - builds and installs upstream CAPI from source (no patch)
 - creates a 3-control-plane / 3-worker workload cluster
 - installs Cilium and waits for healthy node readiness
-- writes runtime/build state under `out/mgmt`
+- writes kubeconfig/runtime state under `out/mgmt`
 
 ### 2) Validate
 
@@ -110,12 +111,12 @@ make setup-external-ca
 What setup does:
 
 - recreates local `capi-mgmt` kind management cluster
-- builds `clusterctl` from source at `CAPI_VERSION`
+- uses local `clusterctl` binary from `PATH`
 - builds and installs patched CAPI from source using patch `hack/capi-patches/0001-external-ca-bootstrap.patch`
 - installs mock external signer stack and KMSService mock
 - creates a 3-control-plane / 3-worker workload cluster
 - installs Cilium and waits for healthy node readiness
-- writes runtime/build state under `out/mgmt`
+- writes kubeconfig/runtime state under `out/mgmt`
 
 ### 2) Validate
 
@@ -163,7 +164,7 @@ make clean
 `make clean` removes:
 
 - local kind management cluster (`capi-mgmt`)
-- `out` (including `out/mgmt`)
+- `out` directory
 
 ## Debug Commands
 
@@ -171,11 +172,11 @@ Management cluster health and CAPI objects:
 
 ```bash
 kubectl --kubeconfig out/mgmt/mgmt.kubeconfig get pods -A | grep -E 'capi-|capd-|cert-manager|trust-manager'
-kubectl --kubeconfig out/mgmt/mgmt.kubeconfig -n default get cluster
-kubectl --kubeconfig out/mgmt/mgmt.kubeconfig -n default get kcp
-kubectl --kubeconfig out/mgmt/mgmt.kubeconfig -n default get md
-kubectl --kubeconfig out/mgmt/mgmt.kubeconfig -n default get machine
-kubectl --kubeconfig out/mgmt/mgmt.kubeconfig -n default describe kcp
+kubectl --kubeconfig out/mgmt/mgmt.kubeconfig get cluster
+kubectl --kubeconfig out/mgmt/mgmt.kubeconfig get kcp
+kubectl --kubeconfig out/mgmt/mgmt.kubeconfig get md
+kubectl --kubeconfig out/mgmt/mgmt.kubeconfig get machine
+kubectl --kubeconfig out/mgmt/mgmt.kubeconfig describe kcp
 ```
 
 Workload cluster health:
@@ -217,7 +218,7 @@ make help
 
 ### 2) Common variables
 
-- `CAPI_VERSION` (default: `v1.8.8`, used both as upstream git ref for source build and for `clusterctl init` provider pinning)
+- `CAPI_VERSION` (default: `v1.8.8`, used as upstream git ref for source build and for `clusterctl init` provider pinning)
 - `KMSSERVICE_MOCK_ADDR` (default: `127.0.0.1:9443`)
 
 Cilium chart version is pinned in scripts to `1.16.7`.

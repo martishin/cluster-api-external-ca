@@ -14,11 +14,35 @@ KMSSERVICE_CA_CERT="$KMSSERVICE_MTLS_CERT_DIR/ca.crt"
 KMSSERVICE_CLIENT_CERT="$KMSSERVICE_MTLS_CERT_DIR/client.crt"
 KMSSERVICE_CLIENT_KEY="$KMSSERVICE_MTLS_CERT_DIR/client.key"
 KMSSERVICE_SERVER_NAME="${KMSSERVICE_SERVER_NAME:-localhost}"
-KUBECONFIG_SERVER="${KUBECONFIG_SERVER:-https://127.0.0.1:6443}"
+KUBECONFIG_SERVER="${KUBECONFIG_SERVER:-}"
 NAMESPACE="default"
 INITIAL_CP_REPLICAS=1
 TARGET_CP_REPLICAS=3
 TARGET_WORKER_REPLICAS=3
+
+cleanup_stale_kmsservice_mock() {
+  local pids
+  pids="$(pgrep -f "kmsservice-mock --addr ${KMSSERVICE_MOCK_ADDR}" || true)"
+  if [[ -z "$pids" ]]; then
+    return 0
+  fi
+
+  log "killing stale kmsservice-mock processes for ${KMSSERVICE_MOCK_ADDR}: ${pids//$'\n'/,}"
+  while IFS= read -r pid; do
+    [[ -n "$pid" ]] || continue
+    kill "$pid" >/dev/null 2>&1 || true
+  done <<< "$pids"
+  sleep 1
+
+  pids="$(pgrep -f "kmsservice-mock --addr ${KMSSERVICE_MOCK_ADDR}" || true)"
+  if [[ -n "$pids" ]]; then
+    log "force-killing stale kmsservice-mock processes: ${pids//$'\n'/,}"
+    while IFS= read -r pid; do
+      [[ -n "$pid" ]] || continue
+      kill -9 "$pid" >/dev/null 2>&1 || true
+    done <<< "$pids"
+  fi
+}
 
 collect_control_plane_sans() {
   local machine_list machine
@@ -38,11 +62,55 @@ collect_control_plane_sans() {
   } | awk 'NF' | sort -u | paste -sd, -
 }
 
+resolve_kubeconfig_server() {
+  local host port
+  host="$(kubectl -n "$NAMESPACE" get cluster "$CLUSTER_NAME" -o jsonpath='{.spec.controlPlaneEndpoint.host}' 2>/dev/null || true)"
+  port="$(kubectl -n "$NAMESPACE" get cluster "$CLUSTER_NAME" -o jsonpath='{.spec.controlPlaneEndpoint.port}' 2>/dev/null || true)"
+  if [[ -n "$host" && -n "$port" ]]; then
+    echo "https://${host}:${port}"
+    return 0
+  fi
+  return 1
+}
+
+wait_for_kubeconfig_server() {
+  local attempts="${1:-60}"
+  local sleep_seconds="${2:-2}"
+  local i
+  for ((i=1; i<=attempts; i++)); do
+    if server="$(resolve_kubeconfig_server)"; then
+      echo "$server"
+      return 0
+    fi
+    sleep "$sleep_seconds"
+  done
+  return 1
+}
+
 apply_bootstrap_material() {
   local san_list
+  local server
+  local server_host
   local cmd
+  if [[ -n "$KUBECONFIG_SERVER" ]]; then
+    server="$KUBECONFIG_SERVER"
+  else
+    if ! server="$(wait_for_kubeconfig_server 90 2)"; then
+      echo "FAIL: cluster controlPlaneEndpoint is not available, cannot set kubeconfig server" >&2
+      exit 1
+    fi
+  fi
   san_list="$(collect_control_plane_sans)"
+  server_host="${server#https://}"
+  server_host="${server_host%%:*}"
+  san_list="$(
+    {
+      echo "$san_list" | tr ',' '\n'
+      echo "$server_host"
+    } | awk 'NF' | sort -u | paste -sd, -
+  )"
   log "refreshing apiserver/etcd cert SAN list: $san_list"
+  log "using bootstrap kubeconfig server: $server"
 
   cmd=(
     go run "$ROOT_DIR/cmd/capi-bootstrap"
@@ -50,7 +118,7 @@ apply_bootstrap_material() {
     --namespace "$NAMESPACE"
     --cluster-name "$CLUSTER_NAME"
     --kcp-name "$KCP_NAME"
-    --server "$KUBECONFIG_SERVER"
+    --server "$server"
     --mode kmsservice
     --kmsservice-endpoint "$KMSSERVICE_ENDPOINT"
     --kmsservice-ca-cert "$KMSSERVICE_CA_CERT"
@@ -76,6 +144,8 @@ fi
 
 log "forcing initial control-plane replicas=${INITIAL_CP_REPLICAS} for first bootstrap"
 kubectl -n "$NAMESPACE" patch "kubeadmcontrolplane/${KCP_NAME}" --type merge -p "{\"spec\":{\"replicas\":${INITIAL_CP_REPLICAS}}}"
+
+cleanup_stale_kmsservice_mock
 
 log "starting kmsservice-mock in background"
 KMSSERVICE_MOCK_ADDR="$KMSSERVICE_MOCK_ADDR" KMSSERVICE_MTLS_CERT_DIR="$KMSSERVICE_MTLS_CERT_DIR" "$POC_DIR/scripts/mock/start-kmsservice-mock.sh" >"$OUT_DIR/kmsservice-mock.log" 2>&1 &

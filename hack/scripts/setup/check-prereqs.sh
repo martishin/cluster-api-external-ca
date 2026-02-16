@@ -4,7 +4,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "$SCRIPT_DIR/../utils/env.sh"
 source "$SCRIPT_DIR/../utils/kube.sh"
 
-require_bin kubectl kind docker openssl go helm git make
+require_bin kubectl kind docker openssl go helm git make clusterctl
 log "all required binaries found"
 
 if ! docker info >/dev/null 2>&1; then
@@ -13,7 +13,6 @@ if ! docker info >/dev/null 2>&1; then
 fi
 log "docker daemon is reachable"
 
-mkdir -p "$OUT_DIR"
-mkdir -p "$TMP_WORK_DIR"
+ensure_out_dirs
 log "output directory: $OUT_DIR"
-log "temporary work directory: $TMP_WORK_DIR"
+log "management work directory: $MGMT_WORK_DIR"
