@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-source "$SCRIPT_DIR/../utils/env.sh"
-source "$SCRIPT_DIR/../utils/kube.sh"
-source "$SCRIPT_DIR/../utils/cache.sh"
+source "$SCRIPT_DIR/../helpers/core/env.sh"
+source "$SCRIPT_DIR/../helpers/core/cache.sh"
 
 CAPI_VERSION="${CAPI_VERSION:-v1.8.8}"
 CAPI_REF="${CAPI_REF:-$CAPI_VERSION}"

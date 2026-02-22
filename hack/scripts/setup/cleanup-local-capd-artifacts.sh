@@ -2,7 +2,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-source "$SCRIPT_DIR/../utils/env.sh"
+source "$SCRIPT_DIR/../helpers/core/env.sh"
 
 pattern='^(self-signed-ca-cluster|external-ca-cluster)(-|$)'
 
@@ -17,4 +17,3 @@ if (( ${#capd_networks[@]} > 0 )); then
   log "removing stale CAPD workload networks: ${#capd_networks[@]}"
   docker network rm "${capd_networks[@]}" >/dev/null 2>&1 || true
 fi
-

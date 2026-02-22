@@ -1,0 +1,113 @@
+---
+apiVersion: controlplane.cluster.x-k8s.io/v1beta1
+kind: KubeadmControlPlane
+metadata:
+  name: __KCP_NAME__
+  namespace: __NAMESPACE__
+spec:
+  replicas: 1
+  version: v1.29.2
+  machineTemplate:
+    infrastructureRef:
+      apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+      kind: DockerMachineTemplate
+      name: __KCP_NAME__
+      namespace: __NAMESPACE__
+  kubeadmConfigSpec:
+    externalCA: true
+    preKubeadmCommands:
+    - mkdir -p /etc/kubernetes/pki/etcd
+    files:
+__KCP_FILES_BLOCK__
+    clusterConfiguration:
+      apiServer:
+        certSANs:
+        - localhost
+        - 127.0.0.1
+        - 0.0.0.0
+    initConfiguration:
+      skipPhases:
+      - kubelet-finalize/experimental-cert-rotation
+      nodeRegistration:
+        kubeletExtraArgs:
+          eviction-hard: nodefs.available<0%,nodefs.inodesFree<0%,imagefs.available<0%
+    joinConfiguration:
+      nodeRegistration:
+        kubeletExtraArgs:
+          eviction-hard: nodefs.available<0%,nodefs.inodesFree<0%,imagefs.available<0%
+---
+apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+kind: DockerMachineTemplate
+metadata:
+  name: __KCP_NAME__
+  namespace: __NAMESPACE__
+spec:
+  template:
+    spec: {}
+---
+apiVersion: cluster.x-k8s.io/v1beta1
+kind: MachineDeployment
+metadata:
+  name: __WORKER_MD_NAME__
+  namespace: __NAMESPACE__
+spec:
+  clusterName: __CLUSTER_NAME__
+  replicas: 0
+  selector:
+    matchLabels:
+      cluster.x-k8s.io/cluster-name: __CLUSTER_NAME__
+  template:
+    spec:
+      clusterName: __CLUSTER_NAME__
+      version: v1.29.2
+      bootstrap:
+        configRef:
+          apiVersion: bootstrap.cluster.x-k8s.io/v1beta1
+          kind: KubeadmConfigTemplate
+          name: __WORKER_TEMPLATE_NAME__
+          namespace: __NAMESPACE__
+      infrastructureRef:
+        apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+        kind: DockerMachineTemplate
+        name: __WORKER_TEMPLATE_NAME__
+        namespace: __NAMESPACE__
+---
+apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+kind: DockerMachineTemplate
+metadata:
+  name: __WORKER_TEMPLATE_NAME__
+  namespace: __NAMESPACE__
+spec:
+  template:
+    spec: {}
+---
+apiVersion: bootstrap.cluster.x-k8s.io/v1beta1
+kind: KubeadmConfigTemplate
+metadata:
+  name: __WORKER_TEMPLATE_NAME__
+  namespace: __NAMESPACE__
+spec:
+  template:
+    spec:
+      files:
+      - contentFrom:
+          secret:
+            key: kubeconfig-kubelet
+            name: __EXTERNAL_CA_FILES_SECRET_NAME__
+        owner: root:root
+        path: /etc/kubernetes/kubelet.conf
+        permissions: "0600"
+      - contentFrom:
+          secret:
+            key: pki-ca-crt
+            name: __EXTERNAL_CA_FILES_SECRET_NAME__
+        owner: root:root
+        path: /etc/kubernetes/pki/ca.crt
+        permissions: "0644"
+      joinConfiguration:
+        nodeRegistration:
+          ignorePreflightErrors:
+          - FileAvailable--etc-kubernetes-kubelet.conf
+          - FileAvailable--etc-kubernetes-pki-ca.crt
+          kubeletExtraArgs:
+            eviction-hard: nodefs.available<0%,nodefs.inodesFree<0%,imagefs.available<0%

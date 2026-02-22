@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-source "$SCRIPT_DIR/../utils/env.sh"
-source "$SCRIPT_DIR/../utils/kube.sh"
+source "$SCRIPT_DIR/../helpers/core/env.sh"
 
 require_bin kubectl kind docker openssl go helm git make rg jq
 log "all required binaries found"

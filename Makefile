@@ -13,43 +13,22 @@ prereqs: ## Check local prerequisites
 	hack/scripts/setup/check-prereqs.sh
 
 setup-self-signed-ca: prereqs ## Setup self-signed CA flow (upstream, no validation)
-	@set -e; \
-	CAPI_VERSION=$(CAPI_VERSION) hack/scripts/01-deploy-kind.sh; \
-	CAPI_VERSION=$(CAPI_VERSION) FLOW_MODE=self-signed hack/scripts/02-build-capi-images.sh; \
-	CAPI_VERSION=$(CAPI_VERSION) FLOW_MODE=self-signed hack/scripts/03-install-capi.sh; \
-	FLOW_MODE=self-signed hack/scripts/04-deploy-bootstrap-step-ca.sh; \
-	FLOW_MODE=self-signed hack/scripts/06-provision-cluster.sh; \
-	FLOW_MODE=self-signed hack/scripts/07-deploy-workload-step-ca.sh
+	CAPI_VERSION=$(CAPI_VERSION) hack/scripts/run/pipeline.sh self-signed setup
 
 setup-external-ca: prereqs patch-check ## Setup external-CA flow (patched, no validation)
-	@set -e; \
-	CAPI_VERSION=$(CAPI_VERSION) hack/scripts/01-deploy-kind.sh; \
-	CAPI_VERSION=$(CAPI_VERSION) FLOW_MODE=external-ca hack/scripts/02-build-capi-images.sh; \
-	CAPI_VERSION=$(CAPI_VERSION) FLOW_MODE=external-ca hack/scripts/03-install-capi.sh; \
-	FLOW_MODE=external-ca hack/scripts/04-deploy-bootstrap-step-ca.sh; \
-	FLOW_MODE=external-ca hack/scripts/05-prepare-bootstrap-secrets.sh; \
-	FLOW_MODE=external-ca hack/scripts/06-provision-cluster.sh; \
-	FLOW_MODE=external-ca hack/scripts/07-deploy-workload-step-ca.sh; \
-	FLOW_MODE=external-ca hack/scripts/08-reroll-control-plane.sh; \
-	FLOW_MODE=external-ca hack/scripts/09-reroll-workers.sh
+	CAPI_VERSION=$(CAPI_VERSION) hack/scripts/run/pipeline.sh external-ca setup
 
 validate-self-signed-ca: ## Validate self-signed CA scenario (upstream)
-	FLOW_MODE=self-signed hack/scripts/10-validate-cluster.sh
+	hack/scripts/run/pipeline.sh self-signed validate
 
 validate-external-ca: ## Validate external-CA scenario (patched)
-	FLOW_MODE=external-ca hack/scripts/10-validate-cluster.sh
+	hack/scripts/run/pipeline.sh external-ca validate
 
-test-self-signed-ca: ## One-command self-signed CA test (clean + setup + validate)
-	@set -e; \
-	$(MAKE) clean; \
-	$(MAKE) setup-self-signed-ca; \
-	$(MAKE) validate-self-signed-ca
+test-self-signed-ca: prereqs ## One-command self-signed CA test (clean + setup + validate)
+	CAPI_VERSION=$(CAPI_VERSION) hack/scripts/run/pipeline.sh self-signed test
 
-test-external-ca: ## One-command external-CA test (clean + setup + validate)
-	@set -e; \
-	$(MAKE) clean; \
-	$(MAKE) setup-external-ca; \
-	$(MAKE) validate-external-ca
+test-external-ca: prereqs patch-check ## One-command external-CA test (clean + setup + validate)
+	CAPI_VERSION=$(CAPI_VERSION) hack/scripts/run/pipeline.sh external-ca test
 
 lint-scripts: ## Validate shell scripts syntax
 	find hack/scripts -type f -name '*.sh' -print0 | xargs -0 -n1 bash -n

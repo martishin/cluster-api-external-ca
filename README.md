@@ -3,13 +3,23 @@
 This repository tests a patch for Cluster API `v1.8.8` that enables external CA:
 
 1. `self-signed` (upstream CAPI, no patch),
-2. `external-ca` (patched CAPI + pre-generated external cert material).
+2. `external-ca` (patched CAPI + pre-generated external bootstrap PKI).
 
 ## Run Locally
 
 ```bash
 make test-self-signed-ca
 make test-external-ca
+```
+
+Or run setup/validate separately:
+
+```bash
+make setup-self-signed-ca
+make validate-self-signed-ca
+
+make setup-external-ca
+make validate-external-ca
 ```
 
 ## Debug Commands
@@ -54,8 +64,8 @@ kubectl --kubeconfig "$WORKLOAD_KUBECONFIG" debug "node/$CP_NODE" --image=busybo
 2. Build CAPI artifacts for pinned version (`v1.8.8`).
 3. Install CAPI into management cluster.
 4. Deploy bootstrap step-ca into management cluster.
-5. Provision workload cluster in external-ca mode with initial `1` control-plane node (bootstrap material signed by management step-ca).
-6. Scale workload workers to `3` (still using bootstrap signed material).
+5. Provision workload cluster in external-ca mode with initial `1` control-plane node (bootstrap PKI signed by management step-ca).
+6. Scale workload workers to `3` (still using bootstrap-signed PKI).
 7. Deploy workload step-ca to workload cluster.
 8. Reroll control-plane to `3` replicas so new control-plane leaf certs are signed through workload signer flow.
 9. Reroll workers so worker kubelet client certs are signed through workload signer flow.
