@@ -3,7 +3,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "$SCRIPT_DIR/../helpers/core/env.sh"
 
-require_bin kubectl kind docker openssl go helm git make rg jq
+require_bin kubectl kind docker openssl go helm git make jq
 log "all required binaries found"
 
 if ! docker info >/dev/null 2>&1; then

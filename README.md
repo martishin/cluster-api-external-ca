@@ -12,6 +12,12 @@ make test-self-signed-ca
 make test-external-ca
 ```
 
+Tests run `clean -> setup -> validate`. To clean clusters and generated artifacts after a test run, execute:
+
+```bash
+make clean
+```
+
 Or run setup/validate separately:
 
 ```bash

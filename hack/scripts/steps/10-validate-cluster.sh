@@ -28,6 +28,10 @@ if [[ ! -s "$kubeconfig_path" ]]; then
   exit 1
 fi
 
+log_check_passed() {
+  log "check passed: $*"
+}
+
 collect_cp_hashes() {
   local out_file="$1"
   local node node_name api_key_hash etcd_peer_hash
@@ -51,6 +55,7 @@ validate_worker_kubelet_client_certs() {
     echo "no worker nodes found for kubelet certificate validation" >&2
     exit 1
   fi
+  log_check_passed "worker nodes discovered for kubelet cert validation"
 
   while IFS= read -r node; do
     [[ -n "$node" ]] || continue
@@ -81,6 +86,7 @@ validate_worker_kubelet_client_certs() {
     fi
 
     printf '%s subject=%s issuer=%s sha256=%s\n' "$node_name" "$cert_subject" "$cert_issuer" "$cert_hash" >> "$out_file"
+    log_check_passed "worker kubelet client certificate issuer/subject for node=$node_name"
   done <<< "$worker_nodes"
 }
 
@@ -88,56 +94,74 @@ case "$MODE" in
   self-signed)
     log "validating self-signed mode"
     kubectl -n "$namespace" get secret "${cluster_name}-ca" -o yaml > "$results_dir/ca-secret.yaml"
+    log_check_passed "captured ${cluster_name}-ca secret to $results_dir/ca-secret.yaml"
     if ! kubectl -n "$namespace" get secret "${cluster_name}-ca" -o jsonpath='{.data.tls\.key}' | grep -q .; then
       echo "expected tls.key in ${cluster_name}-ca for self-signed mode" >&2
       exit 1
     fi
+    log_check_passed "${cluster_name}-ca contains tls.key for self-signed mode"
 
     wait_kube_api_ready "$kubeconfig_path"
+    log_check_passed "workload kube-apiserver is reachable"
     wait_ha_replicas "$namespace" "$cluster_name" "$kcp_name" "$worker_md_name" 3 3 120
+    log_check_passed "HA replicas reached: control-plane=3 workers=3"
     wait_workload_nodes_ready "$kubeconfig_path" 6 120
+    log_check_passed "all expected workload nodes are Ready (6)"
     wait_cilium_healthy "$kubeconfig_path" "$results_dir/cilium-pods.txt" 30 10
+    log_check_passed "cilium pods healthy; wrote $results_dir/cilium-pods.txt"
 
     cp_node="$(control_plane_node_from_kubeconfig "$kubeconfig_path" || true)"
     if [[ -z "$cp_node" ]]; then
       echo "unable to resolve control-plane node for validation" >&2
       exit 1
     fi
+    log_check_passed "resolved control-plane node: $cp_node"
     if ! node_file_exists_via_kubectl_debug "$kubeconfig_path" "$cp_node" /etc/kubernetes/pki/ca.key; then
       echo "expected /etc/kubernetes/pki/ca.key on control-plane node in self-signed mode" >&2
       exit 1
     fi
+    log_check_passed "control-plane node has /etc/kubernetes/pki/ca.key in self-signed mode"
 
     dump_apiserver_chain_from_kubeconfig "$kubeconfig_path" "$results_dir/apiserver-chain.txt"
+    log_check_passed "captured apiserver certificate chain to $results_dir/apiserver-chain.txt"
     ;;
 
   external-ca)
     log "validating external-ca mode"
     kubectl -n "$namespace" get secret "${cluster_name}-ca" -o yaml > "$results_dir/ca-secret.yaml"
+    log_check_passed "captured ${cluster_name}-ca secret to $results_dir/ca-secret.yaml"
     if kubectl -n "$namespace" get secret "${cluster_name}-ca" -o jsonpath='{.data.tls\.key}' | grep -q .; then
       echo "${cluster_name}-ca must not contain tls.key in external-ca mode" >&2
       exit 1
     fi
+    log_check_passed "${cluster_name}-ca does not contain tls.key in external-ca mode"
 
     wait_kube_api_ready "$kubeconfig_path"
+    log_check_passed "workload kube-apiserver is reachable"
     wait_ha_replicas "$namespace" "$cluster_name" "$kcp_name" "$worker_md_name" "$control_plane_replicas" "$worker_replicas" 120
+    log_check_passed "HA replicas reached: control-plane=$control_plane_replicas workers=$worker_replicas"
     wait_workload_nodes_ready "$kubeconfig_path" "$expected_total_nodes" 120
+    log_check_passed "all expected workload nodes are Ready ($expected_total_nodes)"
     wait_cilium_healthy "$kubeconfig_path" "$results_dir/cilium-pods.txt" 30 10
+    log_check_passed "cilium pods healthy; wrote $results_dir/cilium-pods.txt"
 
     cp_node="$(control_plane_node_from_kubeconfig "$kubeconfig_path" || true)"
     if [[ -z "$cp_node" ]]; then
       echo "unable to resolve control-plane node for validation" >&2
       exit 1
     fi
+    log_check_passed "resolved control-plane node: $cp_node"
     if node_file_exists_via_kubectl_debug "$kubeconfig_path" "$cp_node" /etc/kubernetes/pki/ca.key; then
       echo "/etc/kubernetes/pki/ca.key must not exist on control-plane nodes in external-ca mode" >&2
       exit 1
     fi
+    log_check_passed "/etc/kubernetes/pki/ca.key absent on control-plane node in external-ca mode"
 
     if [[ ! -f "$source_ca_cert" ]]; then
       echo "missing source CA certificate for fingerprint validation: $source_ca_cert" >&2
       exit 1
     fi
+    log_check_passed "source CA certificate exists at $source_ca_cert"
 
     kubectl -n "$namespace" get secret "${cluster_name}-ca" -o jsonpath='{.data.tls\.crt}' | base64 -d > "$results_dir/cluster-ca.crt"
     source_ca_fp="$(openssl x509 -in "$source_ca_cert" -noout -fingerprint -sha256 | awk -F= '{print $2}')"
@@ -146,6 +170,7 @@ case "$MODE" in
       echo "external cluster CA fingerprint does not match generated source CA cert" >&2
       exit 1
     fi
+    log_check_passed "external cluster CA fingerprint matches source CA fingerprint"
 
     apiserver_issuer="$(issuer_from_apiserver "$kubeconfig_path")"
     cluster_ca_subject="$(openssl x509 -in "$results_dir/cluster-ca.crt" -noout -subject -nameopt RFC2253 | sed 's/^subject=//')"
@@ -153,8 +178,10 @@ case "$MODE" in
       echo "apiserver issuer does not match external cluster CA subject" >&2
       exit 1
     fi
+    log_check_passed "apiserver issuer matches external cluster CA subject"
 
     validate_worker_kubelet_client_certs "$cluster_ca_subject" "$results_dir/worker-kubelet-cert-info.txt"
+    log_check_passed "worker kubelet client certificate checks complete; wrote $results_dir/worker-kubelet-cert-info.txt"
 
     collect_cp_hashes "$results_dir/control-plane-key-hashes.txt"
     cp_count="$(wc -l < "$results_dir/control-plane-key-hashes.txt" | tr -d ' ')"
@@ -165,8 +192,10 @@ case "$MODE" in
       echo "control-plane key uniqueness check failed (nodes=$cp_count apiserver-unique=$unique_api_keys etcd-unique=$unique_etcd_keys)" >&2
       exit 1
     fi
+    log_check_passed "control-plane key uniqueness: nodes=$cp_count apiserver-unique=$unique_api_keys etcd-unique=$unique_etcd_keys"
 
     dump_apiserver_chain_from_kubeconfig "$kubeconfig_path" "$results_dir/apiserver-chain.txt"
+    log_check_passed "captured apiserver certificate chain to $results_dir/apiserver-chain.txt"
     ;;
 esac
 
