@@ -180,9 +180,10 @@ install_workload_cni() {
   local kubeconfig="$1"
   local timeout="${2:-20m}"
   local cilium_chart_version="1.16.7"
+  local cilium_operator_replicas="${CILIUM_OPERATOR_REPLICAS:-1}"
   local i
 
-  log "installing workload CNI: cilium (chart v${cilium_chart_version})"
+  log "installing workload CNI: cilium (chart v${cilium_chart_version}, operator replicas=${cilium_operator_replicas})"
   helm repo add cilium https://helm.cilium.io >/dev/null 2>&1 || true
   helm repo update cilium >/dev/null
   for ((i=1; i<=6; i++)); do
@@ -191,6 +192,7 @@ install_workload_cni() {
       --version "$cilium_chart_version" \
       --set ipam.mode=kubernetes \
       --set kubeProxyReplacement=false \
+      --set operator.replicas="$cilium_operator_replicas" \
       --wait --timeout "$timeout"; then
       break
     fi
@@ -352,9 +354,49 @@ node_file_exists_via_kubectl_debug() {
   local namespace="${4:-default}"
   local debug_image="${5:-busybox:1.36}"
 
+  # CAPD/kind local path: node names map to docker containers.
+  if command -v docker >/dev/null 2>&1 && docker inspect "$node" >/dev/null 2>&1; then
+    docker exec "$node" sh -ceu "test -f '$file_path'" >/dev/null 2>&1
+    return $?
+  fi
+
   kubectl --kubeconfig "$kubeconfig" -n "$namespace" \
     debug "node/$node" --image="$debug_image" --quiet -- \
     chroot /host test -f "$file_path" >/dev/null 2>&1
+}
+
+node_file_sha256_via_kubectl_debug() {
+  local kubeconfig="$1"
+  local node="$2"
+  local file_path="$3"
+  local namespace="${4:-default}"
+  local debug_image="${5:-busybox:1.36}"
+
+  if command -v docker >/dev/null 2>&1 && docker inspect "$node" >/dev/null 2>&1; then
+    docker exec "$node" sh -ceu "sha256sum '$file_path' | awk '{print \$1}'" 2>/dev/null || true
+    return 0
+  fi
+
+  kubectl --kubeconfig "$kubeconfig" -n "$namespace" \
+    debug "node/$node" --image="$debug_image" --quiet -- \
+    chroot /host sh -ceu "sha256sum '$file_path' | awk '{print \\$1}'" 2>/dev/null || true
+}
+
+node_exec_via_kubectl_debug() {
+  local kubeconfig="$1"
+  local node="$2"
+  local shell_cmd="$3"
+  local namespace="${4:-default}"
+  local debug_image="${5:-busybox:1.36}"
+
+  if command -v docker >/dev/null 2>&1 && docker inspect "$node" >/dev/null 2>&1; then
+    docker exec "$node" sh -ceu "$shell_cmd"
+    return $?
+  fi
+
+  kubectl --kubeconfig "$kubeconfig" -n "$namespace" \
+    debug "node/$node" --image="$debug_image" --quiet -- \
+    chroot /host sh -ceu "$shell_cmd"
 }
 
 issuer_from_apiserver() {

@@ -1,12 +1,10 @@
-.PHONY: help prereqs \
-	setup-self-signed-ca validate-self-signed-ca \
-	setup-external-ca validate-external-ca \
-	e2e-self-signed-ca e2e-external-ca \
-	test lint-scripts patch-check \
-	clean clean-kind clean-out
+.PHONY: help prereqs patch-check \
+	setup-self-signed-ca setup-external-ca \
+	validate-self-signed-ca validate-external-ca \
+	test-self-signed-ca test-external-ca \
+	lint-scripts clean clean-kind clean-out
 
 CAPI_VERSION ?= v1.8.8
-KMSSERVICE_MOCK_ADDR ?= 127.0.0.1:9443
 
 help: ## Show available targets
 	@awk 'BEGIN {FS=":.*## "}; /^[a-zA-Z0-9_.-]+:.*## / {printf "%-28s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -14,47 +12,44 @@ help: ## Show available targets
 prereqs: ## Check local prerequisites
 	hack/scripts/setup/check-prereqs.sh
 
-setup-self-signed-ca: prereqs ## Setup upstream self-signed CA flow (no validation)
-	SETUP_MODE=upstream \
-	CAPI_REF=$(CAPI_VERSION) \
-	CAPI_VERSION=$(CAPI_VERSION) \
-	hack/scripts/deploy/run-setup.sh
-
-validate-self-signed-ca: ## Validate self-signed CA scenario
-	hack/scripts/validate/validate-ca-behavior.sh --mode self-signed
-	EXPECTED_MODE=self-signed hack/scripts/validate/validate-certificate-lineage.sh
-
-setup-external-ca: prereqs ## Setup patched external-CA flow (no validation)
-	SETUP_MODE=patched \
-	CAPI_REF=$(CAPI_VERSION) \
-	CAPI_VERSION=$(CAPI_VERSION) \
-	KMSSERVICE_MOCK_ADDR=$(KMSSERVICE_MOCK_ADDR) \
-	hack/scripts/deploy/run-setup.sh
-
-validate-external-ca: ## Validate external-CA scenario
-	hack/scripts/validate/validate-ca-behavior.sh --mode external-ca
-	EXPECTED_MODE=external-ca hack/scripts/validate/validate-certificate-lineage.sh
-
-e2e-self-signed-ca: ## Convenience flow: clean + setup-self-signed-ca + validate-self-signed-ca + clean
+setup-self-signed-ca: prereqs ## Setup self-signed CA flow (upstream, no validation)
 	@set -e; \
-	status=0; \
-	$(MAKE) clean || status=$$?; \
-	if [ $$status -eq 0 ]; then $(MAKE) setup-self-signed-ca || status=$$?; fi; \
-	if [ $$status -eq 0 ]; then $(MAKE) validate-self-signed-ca || status=$$?; fi; \
-	$(MAKE) clean || true; \
-	exit $$status
+	CAPI_VERSION=$(CAPI_VERSION) hack/scripts/01-deploy-kind.sh; \
+	CAPI_VERSION=$(CAPI_VERSION) FLOW_MODE=self-signed hack/scripts/02-build-capi-images.sh; \
+	CAPI_VERSION=$(CAPI_VERSION) FLOW_MODE=self-signed hack/scripts/03-install-capi.sh; \
+	FLOW_MODE=self-signed hack/scripts/04-deploy-bootstrap-step-ca.sh; \
+	FLOW_MODE=self-signed hack/scripts/06-provision-cluster.sh; \
+	FLOW_MODE=self-signed hack/scripts/07-deploy-workload-step-ca.sh
 
-e2e-external-ca: ## Convenience flow: clean + setup-external-ca + validate-external-ca + clean
+setup-external-ca: prereqs patch-check ## Setup external-CA flow (patched, no validation)
 	@set -e; \
-	status=0; \
-	$(MAKE) clean || status=$$?; \
-	if [ $$status -eq 0 ]; then $(MAKE) setup-external-ca || status=$$?; fi; \
-	if [ $$status -eq 0 ]; then $(MAKE) validate-external-ca || status=$$?; fi; \
-	$(MAKE) clean || true; \
-	exit $$status
+	CAPI_VERSION=$(CAPI_VERSION) hack/scripts/01-deploy-kind.sh; \
+	CAPI_VERSION=$(CAPI_VERSION) FLOW_MODE=external-ca hack/scripts/02-build-capi-images.sh; \
+	CAPI_VERSION=$(CAPI_VERSION) FLOW_MODE=external-ca hack/scripts/03-install-capi.sh; \
+	FLOW_MODE=external-ca hack/scripts/04-deploy-bootstrap-step-ca.sh; \
+	FLOW_MODE=external-ca hack/scripts/05-prepare-bootstrap-secrets.sh; \
+	FLOW_MODE=external-ca hack/scripts/06-provision-cluster.sh; \
+	FLOW_MODE=external-ca hack/scripts/07-deploy-workload-step-ca.sh; \
+	FLOW_MODE=external-ca hack/scripts/08-reroll-control-plane.sh; \
+	FLOW_MODE=external-ca hack/scripts/09-reroll-workers.sh
 
-test: ## Run Go tests
-	go test ./...
+validate-self-signed-ca: ## Validate self-signed CA scenario (upstream)
+	FLOW_MODE=self-signed hack/scripts/10-validate-cluster.sh
+
+validate-external-ca: ## Validate external-CA scenario (patched)
+	FLOW_MODE=external-ca hack/scripts/10-validate-cluster.sh
+
+test-self-signed-ca: ## One-command self-signed CA test (clean + setup + validate)
+	@set -e; \
+	$(MAKE) clean; \
+	$(MAKE) setup-self-signed-ca; \
+	$(MAKE) validate-self-signed-ca
+
+test-external-ca: ## One-command external-CA test (clean + setup + validate)
+	@set -e; \
+	$(MAKE) clean; \
+	$(MAKE) setup-external-ca; \
+	$(MAKE) validate-external-ca
 
 lint-scripts: ## Validate shell scripts syntax
 	find hack/scripts -type f -name '*.sh' -print0 | xargs -0 -n1 bash -n

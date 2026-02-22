@@ -1,0 +1,78 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: __STEPCA_NAME__
+  namespace: __STEPCA_NAMESPACE__
+  labels:
+    app.kubernetes.io/name: __STEPCA_NAME__
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: __STEPCA_NAME__
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: __STEPCA_NAME__
+    spec:
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: node-role.kubernetes.io/control-plane
+                operator: DoesNotExist
+              - key: node-role.kubernetes.io/master
+                operator: DoesNotExist
+      containers:
+      - name: step-ca
+        image: __STEPCA_IMAGE__
+        imagePullPolicy: IfNotPresent
+        command:
+        - step-ca
+        args:
+        - /home/step/config/ca.json
+        - --password-file
+        - /home/step/secrets/password
+        env:
+        - name: STEPPATH
+          value: /home/step
+        ports:
+        - containerPort: __STEPCA_PORT__
+          name: https
+        volumeMounts:
+        - name: config
+          mountPath: /home/step/config
+          readOnly: true
+        - name: files
+          mountPath: /home/step/certs
+          readOnly: true
+        - name: files
+          mountPath: /home/step/secrets
+          readOnly: true
+        - name: db
+          mountPath: /home/step/db
+      volumes:
+      - name: config
+        configMap:
+          name: __STEPCA_NAME__-config
+      - name: files
+        secret:
+          secretName: __STEPCA_NAME__-files
+      - name: db
+        emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: __STEPCA_NAME__
+  namespace: __STEPCA_NAMESPACE__
+  labels:
+    app.kubernetes.io/name: __STEPCA_NAME__
+spec:
+  selector:
+    app.kubernetes.io/name: __STEPCA_NAME__
+  ports:
+  - name: https
+    port: __STEPCA_PORT__
+    targetPort: https
